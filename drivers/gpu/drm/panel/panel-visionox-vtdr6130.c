@@ -66,6 +66,13 @@ static const struct regulator_bulk_data retroidpocket_rp6_supplies[] = {
 	{ .supply = "vdd28" },
 };
 
+static const struct regulator_bulk_data retroidpocket_rp5_supplies[] = {
+	{ .supply = "vdd1v2" },
+	{ .supply = "vddio" },
+	{ .supply = "vdd" },
+	{ .supply = "avdd" },
+};
+
 static inline struct visionox_vtdr6130 *to_visionox_vtdr6130(struct drm_panel *panel)
 {
 	return container_of(panel, struct visionox_vtdr6130, panel);
@@ -419,6 +426,34 @@ static struct visionox_vtdr6130_desc retroidpocket_rp6_panel_desc = {
 	},
 };
 
+/* The SM8250 Retroid Pocket 5 and Flip 2 VTDR6130 panel is the RP6 panel */
+static const struct visionox_vtdr6130_desc retroidpocket_rp5_panel_desc = {
+	.supplies = retroidpocket_rp5_supplies,
+	.num_supplies = ARRAY_SIZE(retroidpocket_rp5_supplies),
+	.reset_delay_ms = 20,
+	.modes = retroidpocket_rp6_modes,
+	.num_modes = ARRAY_SIZE(retroidpocket_rp6_modes),
+	.bpc = 8,
+	.lanes = 4,
+	.format = MIPI_DSI_FMT_RGB888,
+	.mode_flags = MIPI_DSI_MODE_NO_EOT_PACKET |
+		      MIPI_DSI_CLOCK_NON_CONTINUOUS,
+	.init_sequence = retroidpocket_rp6_on,
+	.attr_group = &retroidpocket_rp6_attr_group,
+	.frame_len_120 = 0x1c,
+	.frame_len_60 = 0x7d0,
+	.dsc = {
+		.dsc_version_major = 0x1,
+		.dsc_version_minor = 0x1,
+		.slice_height = 12,
+		.slice_width = 540,
+		.slice_count = 2,
+		.bits_per_component = 8,
+		.bits_per_pixel = 8 << 4,
+		.block_pred_enable = true,
+	},
+};
+
 static const struct drm_display_mode visionox_vtdr6130_modes[] = {
 	{
 		.clock = (1080 + 20 + 2 + 20) * (2400 + 20 + 2 + 18) * 144 / 1000,
@@ -696,8 +731,11 @@ static int visionox_vtdr6130_probe(struct mipi_dsi_device *dsi)
 }
 
 static const struct of_device_id visionox_vtdr6130_of_match[] = {
+	{ .compatible = "retroidpocket,rp5-visionox-panel", .data = &retroidpocket_rp5_panel_desc },
 	{ .compatible = "retroidpocket,rp6-panel", .data = &retroidpocket_rp6_panel_desc },
 	{ .compatible = "retroidpocket,rpduo-panel-top", .data = &retroidpocket_rp6_panel_desc },
+	{ .compatible = "retroidpocket,rpflip2-visionox-panel",
+	  .data = &retroidpocket_rp5_panel_desc },
 	{ .compatible = "visionox,vtdr6130", .data = &visionox_vtdr6130_panel_desc },
 	{ /* sentinel */ }
 };
