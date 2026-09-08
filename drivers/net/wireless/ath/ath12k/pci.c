@@ -8,6 +8,7 @@
 #include <linux/interrupt.h>
 #include <linux/msi.h>
 #include <linux/pci.h>
+#include <linux/platform_device.h>
 #include <linux/time.h>
 #include <linux/vmalloc.h>
 
@@ -341,7 +342,7 @@ static void ath12k_pci_free_ext_irq(struct ath12k_base *ab, int num_ext_irq_grp)
 	}
 }
 
-static void ath12k_pci_free_irq(struct ath12k_base *ab)
+void ath12k_pci_free_irq(struct ath12k_base *ab)
 {
 	ath12k_pci_free_ce_irq(ab, ab->hw_params->ce_count);
 	ath12k_pci_free_ext_irq(ab, ATH12K_EXT_IRQ_GRP_NUM_MAX);
@@ -635,7 +636,7 @@ static int ath12k_pci_set_irq_affinity_hint(struct ath12k_pci *ab_pci,
 	return irq_set_affinity_and_hint(ab_pci->pdev->irq, m);
 }
 
-static int ath12k_pci_config_irq(struct ath12k_base *ab)
+int ath12k_pci_config_irq(struct ath12k_base *ab)
 {
 	struct ath12k_ce_pipe *ce_pipe;
 	u32 msi_data_start;
@@ -1015,9 +1016,11 @@ int ath12k_pci_map_service_to_pipe(struct ath12k_base *ab, u16 service_id,
 
 int ath12k_pci_get_msi_irq(struct device *dev, unsigned int vector)
 {
-	struct pci_dev *pci_dev = to_pci_dev(dev);
+	if (dev_is_pci(dev))
+		return pci_irq_vector(to_pci_dev(dev), vector);
 
-	return pci_irq_vector(pci_dev, vector);
+	/* WCN7750: GIC SPI block in the DT "interrupts" property */
+	return platform_get_irq(to_platform_device(dev), vector);
 }
 
 int ath12k_pci_get_user_msi_assignment(struct ath12k_base *ab, char *user_name,
