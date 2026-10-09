@@ -28,6 +28,9 @@ struct visionox_vtdr6130 {
 	struct gpio_desc *reset_gpio;
 	struct regulator_bulk_data *supplies;
 	enum drm_panel_orientation orientation;
+	bool enabled;
+	u16 frame_len_120;
+	u16 frame_len_60;
 };
 
 struct visionox_vtdr6130_desc {
@@ -44,6 +47,9 @@ struct visionox_vtdr6130_desc {
 	int (*init_sequence)(struct visionox_vtdr6130 *ctx);
 
 	struct drm_dsc_config dsc;
+	const struct attribute_group *attr_group;
+	u16 frame_len_120;
+	u16 frame_len_60;
 };
 
 static const struct regulator_bulk_data visionox_vtdr6130_supplies[] = {
@@ -186,6 +192,22 @@ static int visionox_vtdr6130_get_current_mode(struct visionox_vtdr6130 *ctx)
 	return 0;
 }
 
+static void retroidpocket_rp6_set_frame_len(struct mipi_dsi_multi_context *dsi_ctx,
+					    struct visionox_vtdr6130 *ctx)
+{
+	u8 payload[] = {
+		0xb1,
+		0x02, 0x16, 0x00, 0x14,
+		ctx->frame_len_120 >> 8, ctx->frame_len_120 & 0xff, 0x00,
+		0x02, 0x16, 0x00, 0x14,
+		ctx->frame_len_60 >> 8, ctx->frame_len_60 & 0xff, 0x00,
+		0x02, 0x16, 0x00, 0x14, 0x00, 0x10, 0x00,
+	};
+
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0xaa, 0x10);
+	mipi_dsi_dcs_write_buffer_multi(dsi_ctx, payload, sizeof(payload));
+}
+
 static int retroidpocket_rp6_on(struct visionox_vtdr6130 *ctx)
 {
 	struct mipi_dsi_device *dsi = ctx->dsi;
@@ -225,11 +247,7 @@ static int retroidpocket_rp6_on(struct visionox_vtdr6130 *ctx)
 				     0x1a, 0x78, 0x1a, 0xb6, 0x2a, 0xb6, 0x2a,
 				     0xf4, 0x2a, 0xf4, 0x4b, 0x34, 0x63, 0x74,
 				     0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
-	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xf0, 0xaa, 0x10);
-	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb1, 0x02, 0x16, 0x00, 0x14,
-				     0x00, 0x1c, 0x00, 0x02, 0x16, 0x00, 0x14,
-				     0x07, 0xd0, 0x00, 0x02, 0x16, 0x00, 0x14,
-				     0x00, 0x10, 0x00);
+	retroidpocket_rp6_set_frame_len(&dsi_ctx, ctx);
 	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xf0, 0xaa, 0x10);
 	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xd0, 0x80, 0x05, 0xa0, 0x14,
 				     0x14, 0x00, 0x35, 0x2d, 0x17, 0x22, 0x00,
@@ -283,11 +301,22 @@ static int retroidpocket_rp6_on(struct visionox_vtdr6130 *ctx)
 	return dsi_ctx.accum_err;
 }
 
+static int visionox_vtdr6130_enable(struct drm_panel *panel)
+{
+	struct visionox_vtdr6130 *ctx = to_visionox_vtdr6130(panel);
+
+	ctx->enabled = true;
+
+	return 0;
+}
+
 static int visionox_vtdr6130_disable(struct drm_panel *panel)
 {
 	struct visionox_vtdr6130 *ctx = to_visionox_vtdr6130(panel);
 	struct mipi_dsi_device *dsi = ctx->dsi;
 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
+
+	ctx->enabled = false;
 
 	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
 
@@ -361,6 +390,8 @@ static const struct drm_display_mode retroidpocket_rp6_modes[] = {
 	},
 };
 
+static const struct attribute_group retroidpocket_rp6_attr_group;
+
 static struct visionox_vtdr6130_desc retroidpocket_rp6_panel_desc = {
 	.supplies = retroidpocket_rp6_supplies,
 	.num_supplies = ARRAY_SIZE(retroidpocket_rp6_supplies),
@@ -373,6 +404,9 @@ static struct visionox_vtdr6130_desc retroidpocket_rp6_panel_desc = {
 	.mode_flags = MIPI_DSI_MODE_NO_EOT_PACKET |
 		      MIPI_DSI_CLOCK_NON_CONTINUOUS,
 	.init_sequence = retroidpocket_rp6_on,
+	.attr_group = &retroidpocket_rp6_attr_group,
+	.frame_len_120 = 0x1c,
+	.frame_len_60 = 0x7d0,
 	.dsc = {
 		.dsc_version_major = 0x1,
 		.dsc_version_minor = 0x1,
@@ -462,6 +496,7 @@ static enum drm_panel_orientation visionox_vtdr6130_get_orientation(struct drm_p
 
 static const struct drm_panel_funcs visionox_vtdr6130_panel_funcs = {
 	.disable = visionox_vtdr6130_disable,
+	.enable = visionox_vtdr6130_enable,
 	.prepare = visionox_vtdr6130_prepare,
 	.unprepare = visionox_vtdr6130_unprepare,
 	.get_modes = visionox_vtdr6130_get_modes,
@@ -515,6 +550,87 @@ visionox_vtdr6130_create_backlight(struct mipi_dsi_device *dsi)
 					      &visionox_vtdr6130_bl_ops, &props);
 }
 
+static ssize_t retroidpocket_rp6_frame_len_store(struct device *dev,
+						 u16 *frame_len, u16 min,
+						 u16 max, const char *buf,
+						 size_t count)
+{
+	struct visionox_vtdr6130 *ctx = dev_get_drvdata(dev);
+	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
+	u16 val;
+	int ret;
+
+	ret = kstrtou16(buf, 0, &val);
+	if (ret)
+		return ret;
+
+	if (val < min || val > max)
+		return -EINVAL;
+
+	*frame_len = val;
+
+	if (!ctx->enabled)
+		return count;
+
+	ctx->dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+	retroidpocket_rp6_set_frame_len(&dsi_ctx, ctx);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xf0, 0xaa, 0x00);
+	ctx->dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+
+	if (dsi_ctx.accum_err)
+		return dsi_ctx.accum_err;
+
+	return count;
+}
+
+static ssize_t frame_len_120_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	struct visionox_vtdr6130 *ctx = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%u\n", ctx->frame_len_120);
+}
+
+static ssize_t frame_len_120_store(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t count)
+{
+	struct visionox_vtdr6130 *ctx = dev_get_drvdata(dev);
+
+	return retroidpocket_rp6_frame_len_store(dev, &ctx->frame_len_120,
+						 0x10, 0x80, buf, count);
+}
+static DEVICE_ATTR_RW(frame_len_120);
+
+static ssize_t frame_len_60_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	struct visionox_vtdr6130 *ctx = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%u\n", ctx->frame_len_60);
+}
+
+static ssize_t frame_len_60_store(struct device *dev,
+				  struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct visionox_vtdr6130 *ctx = dev_get_drvdata(dev);
+
+	return retroidpocket_rp6_frame_len_store(dev, &ctx->frame_len_60,
+						 0x76c, 0x834, buf, count);
+}
+static DEVICE_ATTR_RW(frame_len_60);
+
+static struct attribute *retroidpocket_rp6_attrs[] = {
+	&dev_attr_frame_len_120.attr,
+	&dev_attr_frame_len_60.attr,
+	NULL
+};
+
+static const struct attribute_group retroidpocket_rp6_attr_group = {
+	.attrs = retroidpocket_rp6_attrs,
+};
+
 static int visionox_vtdr6130_probe(struct mipi_dsi_device *dsi)
 {
 	struct device *dev = &dsi->dev;
@@ -544,6 +660,15 @@ static int visionox_vtdr6130_probe(struct mipi_dsi_device *dsi)
 
 	ctx->dsi = dsi;
 	mipi_dsi_set_drvdata(dsi, ctx);
+
+	ctx->frame_len_120 = ctx->desc->frame_len_120;
+	ctx->frame_len_60 = ctx->desc->frame_len_60;
+
+	if (ctx->desc->attr_group) {
+		ret = devm_device_add_group(dev, ctx->desc->attr_group);
+		if (ret)
+			return ret;
+	}
 
 	ctx->dsc = ctx->desc->dsc;
 	dsi->dsc = &ctx->dsc;
