@@ -19,14 +19,18 @@
 
 struct visionox_vtdr6130 {
 	struct drm_panel panel;
+	const struct visionox_vtdr6130_desc *desc;
+	struct drm_dsc_config dsc;
 	struct mipi_dsi_device *dsi;
 	struct gpio_desc *reset_gpio;
 	struct regulator_bulk_data *supplies;
 	enum drm_panel_orientation orientation;
-	struct visionox_vtdr6130_desc *desc;
 };
 
 struct visionox_vtdr6130_desc {
+	const struct regulator_bulk_data *supplies;
+	unsigned int num_supplies;
+	unsigned int reset_delay_ms;
 	unsigned int bpc;
 	unsigned int lanes;
 	unsigned long mode_flags;
@@ -52,12 +56,14 @@ static inline struct visionox_vtdr6130 *to_visionox_vtdr6130(struct drm_panel *p
 
 static void visionox_vtdr6130_reset(struct visionox_vtdr6130 *ctx)
 {
+	unsigned int delay = ctx->desc->reset_delay_ms * 1000;
+
 	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-	usleep_range(10000, 11000);
+	usleep_range(delay, delay + 1000);
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-	usleep_range(10000, 11000);
+	usleep_range(delay, delay + 1000);
 	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-	usleep_range(10000, 11000);
+	usleep_range(delay, delay + 1000);
 }
 
 static int retroidpocket_rp6_on(struct visionox_vtdr6130 *ctx)
@@ -244,8 +250,7 @@ static int visionox_vtdr6130_prepare(struct drm_panel *panel)
 	struct visionox_vtdr6130 *ctx = to_visionox_vtdr6130(panel);
 	int ret;
 
-	ret = regulator_bulk_enable(ARRAY_SIZE(visionox_vtdr6130_supplies),
-				    ctx->supplies);
+	ret = regulator_bulk_enable(ctx->desc->num_supplies, ctx->supplies);
 	if (ret < 0)
 		return ret;
 
@@ -254,8 +259,7 @@ static int visionox_vtdr6130_prepare(struct drm_panel *panel)
 	ret = ctx->desc->init_sequence(ctx);
 	if (ret < 0) {
 		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-		regulator_bulk_disable(ARRAY_SIZE(visionox_vtdr6130_supplies),
-				       ctx->supplies);
+		regulator_bulk_disable(ctx->desc->num_supplies, ctx->supplies);
 		return ret;
 	}
 
@@ -270,8 +274,7 @@ static int visionox_vtdr6130_unprepare(struct drm_panel *panel)
 
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 
-	regulator_bulk_disable(ARRAY_SIZE(visionox_vtdr6130_supplies),
-			       ctx->supplies);
+	regulator_bulk_disable(ctx->desc->num_supplies, ctx->supplies);
 
 	return 0;
 }
@@ -293,6 +296,9 @@ static const struct drm_display_mode retroidpocket_rp6_modes[] = {
 };
 
 static struct visionox_vtdr6130_desc retroidpocket_rp6_panel_desc = {
+	.supplies = visionox_vtdr6130_supplies,
+	.num_supplies = ARRAY_SIZE(visionox_vtdr6130_supplies),
+	.reset_delay_ms = 10,
 	.modes = retroidpocket_rp6_modes,
 	.num_modes = ARRAY_SIZE(retroidpocket_rp6_modes),
 	.bpc = 8,
@@ -330,6 +336,9 @@ static const struct drm_display_mode visionox_vtdr6130_modes[] = {
 };
 
 static struct visionox_vtdr6130_desc visionox_vtdr6130_panel_desc = {
+	.supplies = visionox_vtdr6130_supplies,
+	.num_supplies = ARRAY_SIZE(visionox_vtdr6130_supplies),
+	.reset_delay_ms = 10,
 	.modes = visionox_vtdr6130_modes,
 	.num_modes = ARRAY_SIZE(visionox_vtdr6130_modes),
 	.bpc = 8,
@@ -355,19 +364,26 @@ static int visionox_vtdr6130_get_modes(struct drm_panel *panel,
 {
 	struct visionox_vtdr6130 *ctx = to_visionox_vtdr6130(panel);
 	struct drm_display_mode *mode;
+	unsigned int i;
 
-	mode = drm_mode_duplicate(connector->dev, ctx->desc->modes);
-	if (!mode)
-		return -ENOMEM;
+	for (i = 0; i < ctx->desc->num_modes; i++) {
+		mode = drm_mode_duplicate(connector->dev, &ctx->desc->modes[i]);
+		if (!mode)
+			return -ENOMEM;
 
-	drm_mode_set_name(mode);
+		drm_mode_set_name(mode);
 
-	mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
-	connector->display_info.width_mm = mode->width_mm;
-	connector->display_info.height_mm = mode->height_mm;
-	drm_mode_probed_add(connector, mode);
+		mode->type = DRM_MODE_TYPE_DRIVER;
+		if (i == 0)
+			mode->type |= DRM_MODE_TYPE_PREFERRED;
 
-	return 1;
+		drm_mode_probed_add(connector, mode);
+	}
+
+	connector->display_info.width_mm = ctx->desc->modes[0].width_mm;
+	connector->display_info.height_mm = ctx->desc->modes[0].height_mm;
+
+	return ctx->desc->num_modes;
 }
 
 static enum drm_panel_orientation visionox_vtdr6130_get_orientation(struct drm_panel *panel)
@@ -422,9 +438,12 @@ static int visionox_vtdr6130_probe(struct mipi_dsi_device *dsi)
 	if (IS_ERR(ctx))
 		return PTR_ERR(ctx);
 
-	ret = devm_regulator_bulk_get_const(&dsi->dev,
-					    ARRAY_SIZE(visionox_vtdr6130_supplies),
-					    visionox_vtdr6130_supplies,
+	ctx->desc = of_device_get_match_data(dev);
+	if (!ctx->desc)
+		return -ENODEV;
+
+	ret = devm_regulator_bulk_get_const(&dsi->dev, ctx->desc->num_supplies,
+					    ctx->desc->supplies,
 					    &ctx->supplies);
 	if (ret < 0)
 		return ret;
@@ -434,14 +453,11 @@ static int visionox_vtdr6130_probe(struct mipi_dsi_device *dsi)
 		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
 				     "Failed to get reset-gpios\n");
 
-	ctx->desc = (struct visionox_vtdr6130_desc *)of_device_get_match_data(dev);
-	if (!ctx->desc)
-		return -ENODEV;
-
 	ctx->dsi = dsi;
 	mipi_dsi_set_drvdata(dsi, ctx);
 
-	dsi->dsc = &ctx->desc->dsc;
+	ctx->dsc = ctx->desc->dsc;
+	dsi->dsc = &ctx->dsc;
 	dsi->lanes = ctx->desc->lanes;
 	dsi->format = ctx->desc->format;
 	dsi->mode_flags = ctx->desc->mode_flags;
