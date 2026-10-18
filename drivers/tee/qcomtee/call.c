@@ -933,6 +933,7 @@ static int qcomtee_probe(struct platform_device *pdev)
 		QTEE_VERSION_GET_PATCH(qcomtee->qtee_version));
 
 	qtee_register_services(qcomtee->ctx);
+	qcomtee_compat_register(qcomtee, &pdev->dev);
 
 	return 0;
 
@@ -963,6 +964,7 @@ static void qcomtee_remove(struct platform_device *pdev)
 {
 	struct qcomtee *qcomtee = platform_get_drvdata(pdev);
 
+	qcomtee_compat_unregister(qcomtee);
 	qtee_unregister_services();
 	teedev_close_context(qcomtee->ctx);
 	/* Wait for RELEASE operations to be processed for QTEE objects. */
