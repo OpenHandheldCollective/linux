@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Copyright (c) 2026, Teguh Sobirin.
+ */
 
 /dts-v1/;
 
@@ -40,6 +43,7 @@
 		regulator-min-microvolt = <2800000>;
 		regulator-max-microvolt = <2800000>;
 
+		/* TODO: Verify GPIO: ours 143, upstream 142 (kept). */
 		gpio = <&tlmm 142 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
@@ -67,12 +71,165 @@
 	};
 };
 
+&gamepad {
+	axis-range = <1024>;
+	invert-x;
+	invert-y;
+	trigger-left-deadzone = <100>;
+	trigger-right-deadzone = <100>;
+};
+
+&i2c0 {
+	htr3212l: led-controller@3c {
+		compatible = "heroic,htr3212";
+		reg = <0x3c>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		sdb-gpios = <&tlmm 55 GPIO_ACTIVE_HIGH>;
+		vdd-supply = <&vdd_mcu_3v3>;
+
+		ledl_b1: led@1 {
+			reg = <1>;
+			label = "l:r1";
+			color = <LED_COLOR_ID_RED>;
+		};
+		ledl_g1: led@2 {
+			reg = <2>;
+			label = "l:g1";
+			color = <LED_COLOR_ID_GREEN>;
+		};
+		ledl_r1: led@3 {
+			reg = <3>;
+			label = "l:b1";
+			color = <LED_COLOR_ID_BLUE>;
+		};
+		ledl_b2: led@4 {
+			reg = <4>;
+			label = "l:r2";
+			color = <LED_COLOR_ID_RED>;
+		};
+		ledl_g2: led@5 {
+			reg = <5>;
+			label = "l:g2";
+			color = <LED_COLOR_ID_GREEN>;
+		};
+		ledl_r2: led@6 {
+			reg = <6>;
+			label = "l:b2";
+			color = <LED_COLOR_ID_BLUE>;
+		};
+		ledl_b3: led@7 {
+			reg = <7>;
+			label = "l:r3";
+			color = <LED_COLOR_ID_RED>;
+		};
+		ledl_g3: led@8 {
+			reg = <8>;
+			label = "l:g3";
+			color = <LED_COLOR_ID_GREEN>;
+		};
+		ledl_r3: led@9 {
+			reg = <9>;
+			label = "l:b3";
+			color = <LED_COLOR_ID_BLUE>;
+		};
+		ledl_b4: led@a {
+			reg = <10>;
+			label = "l:r4";
+			color = <LED_COLOR_ID_RED>;
+		};
+		ledl_g4: led@b {
+			reg = <11>;
+			label = "l:g4";
+			color = <LED_COLOR_ID_GREEN>;
+		};
+		ledl_r4: led@c {
+			reg = <12>;
+			label = "l:b4";
+			color = <LED_COLOR_ID_BLUE>;
+		};
+	};
+};
+
+&i2c12 {
+	htr3212r: led-controller@3c {
+		compatible = "heroic,htr3212";
+		reg = <0x3c>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		sdb-gpios = <&tlmm 56 GPIO_ACTIVE_HIGH>;
+		vdd-supply = <&vdd_mcu_3v3>;
+
+		ledr_b1: led@1 {
+			reg = <1>;
+			label = "r:r1";
+			color = <LED_COLOR_ID_RED>;
+		};
+		ledr_g1: led@2 {
+			reg = <2>;
+			label = "r:g1";
+			color = <LED_COLOR_ID_GREEN>;
+		};
+		ledr_r1: led@3 {
+			reg = <3>;
+			label = "r:b1";
+			color = <LED_COLOR_ID_BLUE>;
+		};
+		ledr_b2: led@4 {
+			reg = <4>;
+			label = "r:r2";
+			color = <LED_COLOR_ID_RED>;
+		};
+		ledr_g2: led@5 {
+			reg = <5>;
+			label = "r:g2";
+			color = <LED_COLOR_ID_GREEN>;
+		};
+		ledr_r2: led@6 {
+			reg = <6>;
+			label = "r:b2";
+			color = <LED_COLOR_ID_BLUE>;
+		};
+		ledr_b3: led@7 {
+			reg = <7>;
+			label = "r:r3";
+			color = <LED_COLOR_ID_RED>;
+		};
+		ledr_g3: led@8 {
+			reg = <8>;
+			label = "r:g3";
+			color = <LED_COLOR_ID_GREEN>;
+		};
+		ledr_r3: led@9 {
+			reg = <9>;
+			label = "r:b3";
+			color = <LED_COLOR_ID_BLUE>;
+		};
+		ledr_b4: led@a {
+			reg = <10>;
+			label = "r:r4";
+			color = <LED_COLOR_ID_RED>;
+		};
+		ledr_g4: led@b {
+			reg = <11>;
+			label = "r:g4";
+			color = <LED_COLOR_ID_GREEN>;
+		};
+		ledr_r4: led@c {
+			reg = <12>;
+			label = "r:b4";
+			color = <LED_COLOR_ID_BLUE>;
+		};
+	};
+};
+
 &i2c_hub_3 {
 	clock-frequency = <100000>;
 
 	status = "okay";
 
 	touchscreen@38 {
+		/* TODO: Verify touch: ours FT5452, upstream FT5426 (kept). */
 		compatible = "focaltech,ft5426";
 		reg = <0x38>;
 
@@ -83,13 +240,55 @@
 		vcc-supply = <&ts_avdd_3v0>;
 		iovcc-supply = <&ts_vddio_1v8>;
 
-		pinctrl-0 = <&ts_p_rst_default>, <&ts_p_int_default>;
-		pinctrl-1 = <&ts_p_rst_sleep>, <&ts_p_int_sleep>;
+		pinctrl-0 = <&ts_s_rst_default>, <&ts_s_int_default>;
+		pinctrl-1 = <&ts_s_rst_sleep>, <&ts_s_int_sleep>;
 		pinctrl-names = "default", "sleep";
 
 		touchscreen-size-x = <1280>;
 		touchscreen-size-y = <960>;
+
+		no-regmap-bulk-read;
 	};
+};
+
+&mdss_dsi0 {
+	vdda-supply = <&vreg_l3e_1p2>;
+	status = "okay";
+
+	panel@0 {
+		reg = <0>;
+		compatible = "retroidpocket,rpnova-panel";
+
+		pinctrl-0 = <&dsi_p_rst_active>, <&dsi_p_te_active>;
+		pinctrl-1 = <&dsi_p_rst_suspend>, <&dsi_p_te_suspend>;
+		pinctrl-names = "default", "sleep";
+
+		vdd-supply = <&vreg_l11b_1p2>;
+		vddio-supply = <&vreg_l12b_1p8>;
+		vci-supply = <&vreg_l13b_3p0>;
+		vdd18-supply = <&vdd_disp_1v8>;
+		vdd28-supply = <&vdd_disp_2v8>;
+
+		reset-gpios = <&tlmm 133 GPIO_ACTIVE_LOW>;
+
+		rotation = <0>;
+
+		port {
+			panel0_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	remote-endpoint = <&panel0_in>;
+	data-lanes = <0 1 2 3>;
+};
+
+&mdss_dsi0_phy {
+	vdds-supply = <&vreg_l1e_0p88>;
+	status = "okay";
 };
 
 &mdss_dsi1 {
