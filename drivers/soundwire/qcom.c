@@ -886,6 +886,10 @@ static irqreturn_t qcom_swrm_irq_handler(int irq, void *dev_id)
 			case SWRM_INTERRUPT_STATUS_CLK_STOP_FINISHED_V2:
 				break;
 			case SWRM_INTERRUPT_STATUS_EXT_CLK_STOP_WAKEUP:
+				/* Slave woke the bus during clock stop */
+				pm_runtime_get(ctrl->dev);
+				pm_runtime_mark_last_busy(ctrl->dev);
+				pm_runtime_put_autosuspend(ctrl->dev);
 				break;
 			case SWRM_INTERRUPT_STATUS_CMD_IGNORED_AND_EXEC_CONTINUED:
 				ctrl->reg_read(ctrl,
@@ -1707,6 +1711,13 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	clk_prepare_enable(ctrl->hclk);
 
 	ctrl->dev = dev;
+
+	/*
+	 * On SM4450 a slave's wake during clock stop only reaches the CPU
+	 * through the EE0 link manager.
+	 */
+	if (of_machine_is_compatible("qcom,sm4450"))
+		ctrl->ee = SWRM_EE_CPU0;
 	dev_set_drvdata(&pdev->dev, ctrl);
 	mutex_init(&ctrl->port_lock);
 	init_completion(&ctrl->broadcast);
