@@ -10,6 +10,8 @@
 #include <linux/module.h>
 #include <linux/power_supply.h>
 #include <linux/regmap.h>
+#include <linux/regulator/driver.h>
+#include <linux/regulator/machine.h>
 #include <linux/types.h>
 #include <linux/usb/phy.h>
 #include <linux/device.h>
@@ -75,6 +77,7 @@
 
 #define BQ256XX_CHG_CONFIG_MASK		BIT(4)
 #define BQ256XX_CHG_CONFIG_BIT_SHIFT	4
+#define BQ256XX_OTG_CONFIG		BIT(5)
 
 #define BQ256XX_ITERM_MASK		GENMASK(3, 0)
 #define BQ256XX_ITERM_STEP_uA		60000
@@ -1041,6 +1044,67 @@ static int bq256xx_set_input_curr_lim(struct bq256xx_device *bq, int iindpm)
 
 	return regmap_update_bits(bq->regmap, BQ256XX_INPUT_CURRENT_LIMIT,
 					BQ256XX_IINDPM_MASK, iindpm_reg_code);
+}
+
+static int bq256xx_enable_vbus(struct regulator_dev *rdev)
+{
+	struct bq256xx_device *bq = rdev_get_drvdata(rdev);
+
+	return regmap_update_bits(bq->regmap, BQ256XX_CHARGER_CONTROL_0,
+				 BQ256XX_OTG_CONFIG, BQ256XX_OTG_CONFIG);
+}
+
+static int bq256xx_disable_vbus(struct regulator_dev *rdev)
+{
+	struct bq256xx_device *bq = rdev_get_drvdata(rdev);
+
+	return regmap_update_bits(bq->regmap, BQ256XX_CHARGER_CONTROL_0,
+				 BQ256XX_OTG_CONFIG, 0);
+}
+
+static int bq256xx_is_enabled_vbus(struct regulator_dev *rdev)
+{
+	struct bq256xx_device *bq = rdev_get_drvdata(rdev);
+	unsigned int val;
+	int ret;
+
+	ret = regmap_read(bq->regmap, BQ256XX_CHARGER_CONTROL_0, &val);
+	if (ret)
+		return ret;
+
+	return !!(val & BQ256XX_OTG_CONFIG);
+}
+
+static const struct regulator_ops bq256xx_vbus_ops = {
+	.enable = bq256xx_enable_vbus,
+	.disable = bq256xx_disable_vbus,
+	.is_enabled = bq256xx_is_enabled_vbus,
+};
+
+static const struct regulator_desc bq256xx_vbus_desc = {
+	.name = "usb-otg-vbus",
+	.of_match = "usb-otg-vbus",
+	.type = REGULATOR_VOLTAGE,
+	.owner = THIS_MODULE,
+	.ops = &bq256xx_vbus_ops,
+	.fixed_uV = 5000000,
+	.n_voltages = 1,
+};
+
+static int bq256xx_register_vbus_regulator(struct bq256xx_device *bq)
+{
+	struct regulator_config cfg = {
+		.dev = bq->dev,
+		.driver_data = bq,
+	};
+	struct regulator_dev *rdev;
+
+	rdev = devm_regulator_register(bq->dev, &bq256xx_vbus_desc, &cfg);
+	if (IS_ERR(rdev))
+		return dev_err_probe(bq->dev, PTR_ERR(rdev),
+				     "Failed to register VBUS regulator\n");
+
+	return 0;
 }
 
 static void bq256xx_charger_reset(void *data)
@@ -2032,6 +2096,10 @@ static int bq256xx_probe(struct i2c_client *client)
 			return ret;
 	}
 
+	ret = bq256xx_register_vbus_regulator(bq);
+	if (ret)
+		return ret;
+
 	ret = bq256xx_hw_init(bq);
 	if (ret) {
 		dev_err(dev, "Cannot initialize the chip.\n");
@@ -2079,6 +2147,14 @@ static const struct acpi_device_id bq256xx_acpi_match[] = {
 };
 MODULE_DEVICE_TABLE(acpi, bq256xx_acpi_match);
 
+static void bq256xx_shutdown(struct i2c_client *client)
+{
+	struct bq256xx_device *bq = i2c_get_clientdata(client);
+
+	regmap_update_bits(bq->regmap, BQ256XX_CHARGER_CONTROL_0,
+			   BQ256XX_OTG_CONFIG, 0);
+}
+
 static struct i2c_driver bq256xx_driver = {
 	.driver = {
 		.name = "bq256xx-charger",
@@ -2086,6 +2162,7 @@ static struct i2c_driver bq256xx_driver = {
 		.acpi_match_table = bq256xx_acpi_match,
 	},
 	.probe = bq256xx_probe,
+	.shutdown = bq256xx_shutdown,
 	.id_table = bq256xx_i2c_ids,
 };
 module_i2c_driver(bq256xx_driver);
