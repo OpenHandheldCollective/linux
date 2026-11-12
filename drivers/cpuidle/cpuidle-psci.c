@@ -478,4 +478,4 @@ static int __init psci_idle_init(void)
 
 	return 0;
 }
-subsys_initcall(psci_idle_init);
+late_initcall_sync(psci_idle_init);
