@@ -2340,6 +2340,7 @@ static void qca_power_off(struct hci_uart *hu)
 	power = qcadev->bt_power;
 
 	switch (soc_type) {
+	case QCA_WCN3950:
 	case QCA_WCN3988:
 	case QCA_WCN3990:
 	case QCA_WCN3991:
@@ -2364,6 +2365,7 @@ static void qca_power_off(struct hci_uart *hu)
         }
 
 	switch (soc_type) {
+	case QCA_WCN3950:
 	case QCA_WCN3988:
 	case QCA_WCN3990:
 	case QCA_WCN3991:
@@ -2587,7 +2589,8 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 					     "failed to acquire BT_EN gpio\n");
 
 		if (!qcadev->bt_en &&
-		    (data->soc_type == QCA_WCN6750 ||
+		    (data->soc_type == QCA_WCN3950 ||
+		     data->soc_type == QCA_WCN6750 ||
 		     data->soc_type == QCA_WCN6855 ||
 		     data->soc_type == QCA_WCN7850 ||
 		     data->soc_type == QCA_WCN7860 ||
@@ -2597,7 +2600,8 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 		qcadev->sw_ctrl = devm_gpiod_get_optional(&serdev->dev, "swctrl",
 					       GPIOD_IN);
 		if (IS_ERR(qcadev->sw_ctrl) &&
-		    (data->soc_type == QCA_WCN6750 ||
+		    (data->soc_type == QCA_WCN3950 ||
+		     data->soc_type == QCA_WCN6750 ||
 		     data->soc_type == QCA_WCN6855 ||
 		     data->soc_type == QCA_WCN7850 ||
 		     data->soc_type == QCA_WCN7860 ||
@@ -2679,6 +2683,7 @@ static void qca_serdev_remove(struct serdev_device *serdev)
 	struct qca_power *power = qcadev->bt_power;
 
 	switch (qcadev->btsoc_type) {
+	case QCA_WCN3950:
 	case QCA_WCN3988:
 	case QCA_WCN3990:
 	case QCA_WCN3991:
