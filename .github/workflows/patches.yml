@@ -1,0 +1,48 @@
+name: Export patches
+
+on: [push]
+
+permissions:
+  contents: read
+
+jobs:
+  patches:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 500
+          persist-credentials: false
+      - name: Export fork commits
+        shell: bash
+        run: |
+          # kernel.org doesn't support --filter, using mirrors
+          git remote add mainline https://github.com/torvalds/linux.git
+          git remote add stable https://github.com/gregkh/linux.git
+          # filter: skip trees and file contents
+          git fetch --no-tags --filter=tree:0 mainline
+          git fetch --no-tags --filter=tree:0 stable
+          if ! git merge-base HEAD mainline/master > /dev/null; then
+            echo "ERROR:: No common ancestor with mainline/master. Cannot export patches."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/artifact/patches"
+          git format-patch --binary --output-directory "$RUNNER_TEMP/artifact/patches" HEAD --not --remotes=mainline --remotes=stable
+          rm -f "$RUNNER_TEMP/artifact/patches/"*OHC*.patch
+      - name: Generate config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flex bison clang lld
+          make ARCH=arm64 LLVM=1 defconfig handheld.config misc.config
+          cp .config "$RUNNER_TEMP/artifact/config"
+      - name: Name artifact
+        id: artifact
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          [ -n "$PR_NUMBER" ] && REF="pr${PR_NUMBER}" || REF="${GITHUB_REF_NAME//\//_}"
+          echo "name=linux-${REF}-${GITHUB_SHA::12}-run${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ runner.temp }}/artifact/
