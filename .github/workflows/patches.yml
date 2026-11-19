@@ -1,0 +1,107 @@
+name: Export patches and build APK
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  export-patches:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ steps.artifact.outputs.name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 500
+          filter: blob:none
+          persist-credentials: false
+      - name: Export fork commits
+        shell: bash
+        run: |
+          # kernel.org doesn't support --filter, using mirrors
+          git remote add mainline https://github.com/torvalds/linux.git
+          git remote add stable https://github.com/gregkh/linux.git
+          # filter: skip trees and file contents
+          git fetch --no-tags --filter=tree:0 mainline
+          git fetch --no-tags --filter=tree:0 stable
+          if ! git merge-base HEAD mainline/master > /dev/null; then
+            echo "ERROR:: No common ancestor with mainline/master. Cannot export patches."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/artifact/patches"
+          git format-patch --binary --output-directory "$RUNNER_TEMP/artifact/patches" HEAD --not --remotes=mainline --remotes=stable
+          rm -f "$RUNNER_TEMP/artifact/patches/"*OHC*.patch
+      - name: Generate configs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flex bison clang lld llvm pahole
+          make ARCH=arm64 LLVM=1 defconfig handheld.config misc.config
+          cp .config "$RUNNER_TEMP/artifact/config"
+          make ARCH=arm64 LLVM=1 defconfig handheld.config misc.config nura.config
+          cp .config "$RUNNER_TEMP/artifact/config-nura"
+      - name: Name artifact
+        id: artifact
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          [ -n "$PR_NUMBER" ] && REF="pr${PR_NUMBER}" || REF="${GITHUB_REF_NAME//\//_}"
+          echo "name=linux-${REF}-${GITHUB_SHA::12}-run${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        id: upload
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ runner.temp }}/artifact/
+      - name: Link public downloads
+        run: |
+          echo 'Download patches and kernel configs:  ' >> "$GITHUB_STEP_SUMMARY"
+          echo "https://nightly.link/${GITHUB_REPOSITORY}/actions/artifacts/${{ steps.upload.outputs.artifact-id }}.zip" >> "$GITHUB_STEP_SUMMARY"
+
+  build-nura-package:
+    needs: export-patches
+    runs-on: ubuntu-26.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.export-patches.outputs.artifact-name }}
+          path: ${{ runner.temp }}/artifact/
+      - name: Clone pmbootstrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git python3 kpartx openssl
+          git clone --depth 1 https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git "$RUNNER_TEMP/pmbootstrap"
+          ln -s pmbootstrap.py "$RUNNER_TEMP/pmbootstrap/pmbootstrap"
+          echo "$RUNNER_TEMP/pmbootstrap" >> "$GITHUB_PATH"
+      - name: Configure pmbootstrap
+        run: |
+          # Keep tracked sources such as timeconst.bc when copying.
+          sed -i 's/rsync_args="--exclude-from=.*"/rsync_args=""/' "$RUNNER_TEMP/pmbootstrap/pmb/build/backend.py"
+          pmbootstrap --details-to-stdout init < <(yes '')
+          pmbootstrap config ui none
+          pmbootstrap config device qcom-handheld
+      - name: Build kernel APK
+        run: |
+          aport="$(pmbootstrap config aports)/device/testing/linux-qcom-handheld"
+          cp "$RUNNER_TEMP/artifact/config-nura" "$aport/config-qcom-handheld.aarch64"
+          version="$(make -s kernelversion)"
+          sed -i -e "s/^pkgver=.*/pkgver=${version//-/_}/" -e 's/^pkgrel=.*/pkgrel=0/' "$aport/APKBUILD"
+          pmbootstrap --details-to-stdout build --src "$GITHUB_WORKSPACE" linux-qcom-handheld
+          mkdir -p "$RUNNER_TEMP/apk"
+          find "$(pmbootstrap config work)/packages" -type f -name 'linux-qcom-handheld-*.apk' -exec cp {} "$RUNNER_TEMP/apk/" \;
+      - uses: actions/upload-artifact@v7
+        id: upload
+        with:
+          name: ${{ needs.export-patches.outputs.artifact-name }}-nura
+          path: ${{ runner.temp }}/apk/
+          if-no-files-found: error
+      - name: Link public downloads
+        run: |
+          echo 'Download Nura kernel package:  ' >> "$GITHUB_STEP_SUMMARY"
+          echo "https://nightly.link/${GITHUB_REPOSITORY}/actions/artifacts/${{ steps.upload.outputs.artifact-id }}.zip" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "wget https://nightly.link/${GITHUB_REPOSITORY}/actions/artifacts/${{ steps.upload.outputs.artifact-id }}.zip" >> "$GITHUB_STEP_SUMMARY"
+          echo "unzip ${{ steps.upload.outputs.artifact-id }}.zip" >> "$GITHUB_STEP_SUMMARY"
+          echo "apk add --allow-untrusted ./$(basename "$RUNNER_TEMP"/apk/*.apk)" >> "$GITHUB_STEP_SUMMARY"
