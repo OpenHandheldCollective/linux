@@ -1,0 +1,29 @@
+name: Check sign-offs
+
+on: pull_request
+
+permissions:
+  pull-requests: read
+
+jobs:
+  signoff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR commit sign-offs
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              ...context.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+
+            for (const entry of commits) {
+              const message = entry.commit.message;
+              const hasSignoff = /^Signed-off-by:[ \t]+\S/m.test(message);
+
+              if (!hasSignoff) {
+                core.setFailed(`Commit ${entry.sha} is missing Signed-off-by.`);
+              }
+            }
